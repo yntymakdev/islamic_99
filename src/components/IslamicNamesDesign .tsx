@@ -41,6 +41,7 @@ const IslamicNamesDesign = () => {
       transliteration: "Al-Malik",
       meaning: "Царь",
       description: "Абсолютный владыка всего сущего",
+      // description: "Абсолютный владыка всего сущего",
       audio: "rahman.mp3",
     },
     {
