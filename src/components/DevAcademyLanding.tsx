@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Code,
   Globe,
@@ -45,8 +45,61 @@ import {
   Bot,
   Headphones,
 } from "lucide-react";
+import DevAcademyLoader from "./DevAcademyLoader";
+import ChatBot from "./DevTest";
 
-const DevAcademyLanding = () => {
+// Тип для опций чата
+type ChatOption = {
+  text: string;
+  value: string;
+  emoji?: string;
+  multi?: boolean;
+  action?: "enroll" | "question" | "restart" | "whatsapp" | "form"; // действия кнопок
+};
+
+// Тип для одного шага чата
+type ChatStep = {
+  message: string;
+  options?: ChatOption[];
+  next?: keyof typeof chatFlow;
+  type?: "input";
+};
+
+// Тип сообщения в чате
+type Message = {
+  id: number;
+  text: string;
+  sender: "bot" | "user";
+  options?: ChatOption[] | null;
+  timestamp: Date;
+};
+
+// Тип для профиля пользователя
+type UserProfile = {
+  name: string;
+  experience: string;
+  interests: string[];
+  timeAvailable: string;
+  goals: string;
+  currentJob: string;
+};
+
+// Тип для рекомендованного курса
+type Recommendation = {
+  course: {
+    title: string;
+    salary: string;
+    duration: string;
+    practice: string;
+  };
+  courseKey: string;
+  score: number;
+  explanation: string;
+  reasons: string[];
+};
+
+const DevAcademyLanding: React.FC = () => {
+  const [isLoading, setIsLoading] = useState(true);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("frontend");
@@ -58,7 +111,357 @@ const DevAcademyLanding = () => {
   const [showChat, setShowChat] = useState(false);
   const [timeLeft, setTimeLeft] = useState({ hours: 23, minutes: 59, seconds: 59 });
 
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputValue, setInputValue] = useState<string>("");
+  const [currentStep, setCurrentStep] = useState<keyof typeof chatFlow>("greeting");
+  const [userProfile, setUserProfile] = useState<UserProfile>({
+    name: "",
+    experience: "",
+    interests: [],
+    timeAvailable: "",
+    goals: "",
+    currentJob: "",
+  });
+  const [isTyping, setIsTyping] = useState<boolean>(false);
+  const [recommendedCourse, setRecommendedCourse] = useState<Recommendation | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
   const words = ["Frontend", "Backend", "Full-Stack", "Mobile"];
+
+  // Chat flow (для типизации next используем keyof)
+  const chatFlow = {
+    greeting: { message: "Привет! 👋 Меня зовут Айгерим...", type: "input", next: "experience" },
+    experience: {
+      message: "Приятно познакомиться! Расскажи о своем опыте в программировании:",
+      options: [
+        { text: "🌱 Полный новичок", value: "beginner", emoji: "🌱" },
+        { text: "💡 Немного знаком", value: "some", emoji: "💡" },
+        { text: "💻 Есть опыт, хочу развиваться", value: "experienced", emoji: "💻" },
+      ],
+      next: "currentJob",
+    },
+    currentJob: {
+      message: "А чем ты сейчас занимаешься?",
+      options: [
+        { text: "🎓 Учусь в университете", value: "student", emoji: "🎓" },
+        { text: "💼 Работаю не в IT", value: "other_job", emoji: "💼" },
+        { text: "🔄 Хочу сменить профессию", value: "career_change", emoji: "🔄" },
+        { text: "🏠 В поиске работы", value: "unemployed", emoji: "🏠" },
+      ],
+      next: "interests",
+    },
+    interests: {
+      message: "Что тебе больше всего интересно? (можешь выбрать несколько)",
+      options: [
+        { text: "🎨 Создавать красивые сайты", value: "frontend", multi: true, emoji: "🎨" },
+        { text: "⚙️ Программировать логику", value: "backend", multi: true, emoji: "⚙️" },
+        { text: "📱 Мобильные приложения", value: "mobile", multi: true, emoji: "📱" },
+        { text: "🚀 Полный цикл разработки", value: "fullstack", multi: true, emoji: "🚀" },
+        { text: "☁️ Серверы и DevOps", value: "devops", multi: true, emoji: "☁️" },
+      ],
+      next: "timeAvailable",
+    },
+    timeAvailable: {
+      message: "Сколько времени готов уделять обучению?",
+      options: [
+        { text: "⏰ 5-10 часов/неделя", value: "light", emoji: "⏰" },
+        { text: "📚 15-20 часов/неделя", value: "medium", emoji: "📚" },
+        { text: "🔥 20+ часов/неделя", value: "intensive", emoji: "🔥" },
+      ],
+      next: "goals",
+    },
+    goals: {
+      message: "Какая твоя главная цель?",
+      options: [
+        { text: "💰 Высокая зарплата", value: "salary", emoji: "💰" },
+        { text: "🎯 Сменить профессию", value: "career", emoji: "🎯" },
+        { text: "💡 Развить навыки", value: "skills", emoji: "💡" },
+        { text: "🏢 Открыть свой бизнес", value: "business", emoji: "🏢" },
+      ],
+      next: "recommendation",
+    },
+  } as const;
+
+  // Функции чата с полной типизацией
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const addBotMessage = (text: string, options: ChatOption[] | null = null, showTyping: boolean = true) => {
+    if (showTyping) {
+      setIsTyping(true);
+      setTimeout(() => {
+        setIsTyping(false);
+        setMessages((prev) => [...prev, { id: Date.now(), text, sender: "bot", options, timestamp: new Date() }]);
+      }, 1000 + Math.random() * 1000);
+    } else {
+      setMessages((prev) => [...prev, { id: Date.now(), text, sender: "bot", options, timestamp: new Date() }]);
+    }
+  };
+
+  const addUserMessage = (text: string) => {
+    setMessages((prev) => [...prev, { id: Date.now(), text, sender: "user", timestamp: new Date() }]);
+  };
+
+  const handleOptionClick = (option: ChatOption) => {
+    const currentFlow: ChatStep = chatFlow[currentStep];
+
+    if (currentFlow?.options?.some((opt) => opt.multi)) {
+      if (userProfile.interests.includes(option.value)) {
+        setUserProfile((prev) => ({ ...prev, interests: prev.interests.filter((i) => i !== option.value) }));
+      } else {
+        setUserProfile((prev) => ({ ...prev, interests: [...prev.interests, option.value] }));
+        addUserMessage(option.text);
+      }
+      return;
+    }
+
+    addUserMessage(option.text);
+    setUserProfile((prev) => ({ ...prev, [currentStep]: option.value }));
+
+    const nextStep = currentFlow.next;
+    if (nextStep) {
+      setCurrentStep(nextStep);
+      const nextFlow: ChatStep = chatFlow[nextStep];
+      addBotMessage(nextFlow.message, nextFlow.options || null);
+    }
+  };
+
+  const handleInputSubmit = () => {
+    if (!inputValue.trim()) return;
+
+    addUserMessage(inputValue);
+
+    if (currentStep === "greeting") {
+      setUserProfile((prev) => ({ ...prev, name: inputValue }));
+      setInputValue("");
+      const nextFlow: ChatStep = chatFlow.experience;
+      setCurrentStep("experience");
+      addBotMessage(`${inputValue}, ${nextFlow.message}`, nextFlow.options || null);
+    } else if (currentStep === "interests" && userProfile.interests.length > 0) {
+      const nextStep = chatFlow[currentStep].next;
+      if (nextStep) setCurrentStep(nextStep);
+    }
+
+    setInputValue("");
+  };
+
+  const proceedToNext = () => {
+    const nextStep = chatFlow[currentStep].next;
+    setCurrentStep(nextStep);
+
+    if (nextStep === "recommendation") {
+      generateRecommendation();
+    } else {
+      const nextFlow = chatFlow[nextStep];
+      addBotMessage(nextFlow.message, nextFlow.options);
+    }
+  };
+
+  const generateRecommendation = () => {
+    setTimeout(() => {
+      const recommendation = analyzeUserProfile();
+      setRecommendedCourse(recommendation);
+
+      const messages = [
+        `Отлично! Я проанализировала твои ответы... 🤔`,
+        `На основе твоего профиля, рекомендую курс: **${recommendation.course.title}**! 🎯`,
+        recommendation.explanation,
+        `**Почему именно этот курс:**\n${recommendation.reasons.join("\n")}`,
+        `💰 Зарплата: ${recommendation.course.salary}\n⏱️ Длительность: ${recommendation.course.duration}\n🎯 Проектов: ${recommendation.course.practice}`,
+      ];
+
+      messages.forEach((msg, index) => {
+        setTimeout(() => {
+          addBotMessage(
+            msg,
+            index === messages.length - 1
+              ? [
+                  { text: "📞 Записаться на курс", value: "enroll", action: "enroll" },
+                  { text: "💬 Задать вопрос", value: "question", action: "question" },
+                  { text: "🔄 Пройти тест заново", value: "restart", action: "restart" },
+                ]
+              : null
+          );
+        }, (index + 1) * 1500);
+      });
+    }, 1000);
+  };
+
+  const analyzeUserProfile = () => {
+    const { experience, interests, timeAvailable, goals, currentJob } = userProfile;
+
+    // Система подсчета очков для каждого курса
+    const scores = {
+      frontend: 0,
+      backend: 0,
+      fullstack: 0,
+      mobile: 0,
+    };
+
+    // Анализ интересов
+    interests.forEach((interest) => {
+      if (interest === "frontend") {
+        scores.frontend += 30;
+        scores.fullstack += 15;
+      }
+      if (interest === "backend") {
+        scores.backend += 30;
+        scores.fullstack += 15;
+      }
+      if (interest === "mobile") {
+        scores.mobile += 30;
+        scores.fullstack += 10;
+      }
+      if (interest === "fullstack") {
+        scores.fullstack += 25;
+      }
+    });
+
+    // Анализ опыта
+    if (experience === "beginner") {
+      scores.frontend += 20; // Легче для начинающих
+      scores.mobile += 15;
+    } else if (experience === "experienced") {
+      scores.fullstack += 20;
+      scores.backend += 15;
+    }
+
+    // Анализ времени
+    if (timeAvailable === "light") {
+      scores.frontend += 15;
+      scores.mobile += 10;
+    } else if (timeAvailable === "intensive") {
+      scores.fullstack += 20;
+      scores.backend += 15;
+    }
+
+    // Анализ целей
+    if (goals === "salary") {
+      scores.fullstack += 25;
+      scores.backend += 20;
+    } else if (goals === "career") {
+      scores.frontend += 20;
+      scores.mobile += 15;
+    }
+
+    // Анализ текущей работы
+    if (currentJob === "student") {
+      scores.frontend += 10;
+    } else if (currentJob === "career_change") {
+      scores.fullstack += 15;
+    }
+
+    // Определяем победителя
+    const winner = Object.entries(scores).reduce((a, b) => (scores[a[0]] > scores[b[0]] ? a : b));
+    const courseKey = winner[0];
+
+    return {
+      course: courses[courseKey],
+      courseKey,
+      score: winner[1],
+      explanation: getExplanation(courseKey, userProfile),
+      reasons: getReasons(courseKey, userProfile),
+    };
+  };
+
+  const getExplanation = (courseKey, profile) => {
+    const explanations = {
+      frontend: `Perfect! Frontend подходит тебе, потому что ты ${
+        profile.experience === "beginner"
+          ? "новичок и этот курс отлично подходит для старта"
+          : "интересуешься созданием пользовательских интерфейсов"
+      } 🎨`,
+      backend: `Отличный выбор! Backend идеален для тебя, так как ${
+        profile.goals === "salary" ? "здесь высокие зарплаты" : "ты любишь логику и системы"
+      } ⚙️`,
+      fullstack: `Супер! Full-Stack это твой путь! ${
+        profile.timeAvailable === "intensive"
+          ? "У тебя достаточно времени для изучения полного стека"
+          : "Это даст тебе максимум возможностей"
+      } 🚀`,
+      mobile: `Замечательно! Mobile разработка для тебя, потому что ${
+        profile.interests.includes("mobile")
+          ? "ты прямо сказал об интересе к мобильным приложениям"
+          : "это быстрорастущая сфера"
+      } 📱`,
+    };
+    return explanations[courseKey] || "Этот курс идеально подходит под твой профиль!";
+  };
+
+  const getReasons = (courseKey, profile) => {
+    const allReasons = {
+      frontend: [
+        "✨ Быстрый старт для новичков",
+        "🎨 Визуальные результаты работы",
+        "💼 Много вакансий на рынке",
+        "🚀 Можно быстро найти первую работу",
+      ],
+      backend: [
+        "💰 Высокие зарплаты",
+        "🔧 Работа с логикой и алгоритмами",
+        "🏢 Востребовано в крупных компаниях",
+        "📈 Отличные перспективы роста",
+      ],
+      fullstack: [
+        "🌟 Максимум возможностей на рынке",
+        "💡 Полное понимание веб-разработки",
+        "🎯 Можешь работать в любой команде",
+        "💸 Самые высокие зарплаты",
+      ],
+      mobile: [
+        "📱 Быстрорастущий рынок",
+        "🎮 Создание пользовательских приложений",
+        "💎 Уникальные навыки",
+        "🌍 Работа с международными проектами",
+      ],
+    };
+
+    return allReasons[courseKey]?.slice(0, 3) || ["🎯 Отличные перспективы"];
+  };
+
+  const handleActionClick = (action) => {
+    if (action === "enroll") {
+      addUserMessage("Хочу записаться на курс!");
+      setTimeout(() => {
+        addBotMessage(
+          "Отлично! Сейчас перенаправлю тебя к форме записи. Или можешь написать в WhatsApp: +996 709 826 628 📱",
+          [
+            { text: "📱 WhatsApp", value: "whatsapp", action: "whatsapp" },
+            { text: "📋 Форма записи", value: "form", action: "form" },
+          ]
+        );
+      }, 1000);
+    } else if (action === "question") {
+      addUserMessage("У меня есть вопрос");
+      setTimeout(() => {
+        addBotMessage("Конечно! Задавай любой вопрос, я помогу 😊", [], false);
+        setCurrentStep("question");
+      }, 800);
+    } else if (action === "restart") {
+      addUserMessage("Хочу пройти тест заново");
+      setTimeout(() => {
+        setMessages([]);
+        setCurrentStep("greeting");
+        setUserProfile({
+          name: "",
+          experience: "",
+          interests: [],
+          timeAvailable: "",
+          goals: "",
+          currentJob: "",
+        });
+        setRecommendedCourse(null);
+        addBotMessage(chatFlow.greeting.message);
+      }, 800);
+    } else if (action === "whatsapp") {
+      window.open("https://wa.me/996709826628", "_blank");
+    }
+  };
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 50);
@@ -170,7 +573,14 @@ const DevAcademyLanding = () => {
 
   return (
     <div className="min-h-screen bg-black text-white relative overflow-hidden">
-      {/* Animated Background */}
+      {/* Animated Background
+       {isLoading && (
+      <DevAcademyLan onLoadingComplete={() => setIsLoading(false)} />
+    )}
+    {!isLoading && (
+      <DevAcademyLanding />
+    )} */}
+
       <div className="fixed inset-0 opacity-30">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl animate-pulse"></div>
         <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-emerald-500 rounded-full mix-blend-multiply filter blur-3xl animate-pulse animation-delay-2000"></div>
@@ -524,7 +934,6 @@ const DevAcademyLanding = () => {
                 </div>
               </div>
             </div>
-
             <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-8">
               <h3 className="text-2xl font-bold text-white mb-6">Быстрая запись</h3>
               <form className="space-y-4">
@@ -567,30 +976,138 @@ const DevAcademyLanding = () => {
 
       {/* Chat Widget */}
       {showChat && (
-        <div className="fixed bottom-24 right-6 w-96 h-96 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl z-50">
-          <div className="p-4 border-b border-zinc-700">
-            <h3 className="text-white font-bold">Онлайн поддержка</h3>
-            <p className="text-emerald-400 text-sm">Отвечаем за 1 минуту</p>
-          </div>
-          <div className="p-4 h-64 overflow-y-auto">
-            <div className="bg-emerald-500/20 border border-emerald-500/30 rounded-lg p-3 mb-2">
-              <p className="text-white text-sm">Привет! Как я могу помочь?</p>
-            </div>
-          </div>
-          <div className="p-4 border-t border-zinc-700">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none"
-                placeholder="Напишите сообщение..."
-              />
-              <button className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg">
-                <Send className="w-4 h-4" />
+        <div className="fixed bottom-24 right-6 w-96 h-[500px] bg-zinc-900/95 backdrop-blur-xl border border-zinc-700 rounded-2xl shadow-2xl z-50 flex flex-col">
+          {/* Header */}
+          <div className="p-4 border-b border-zinc-700 bg-gradient-to-r from-emerald-500/10 to-teal-500/10">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-bold flex items-center">
+                  <Brain className="w-5 h-5 mr-2 text-emerald-400" />
+                  IT Консультант
+                </h3>
+                <p className="text-emerald-400 text-sm flex items-center">
+                  <div className="w-2 h-2 bg-emerald-400 rounded-full mr-2 animate-pulse"></div>
+                  Помогаю выбрать курс
+                </p>
+              </div>
+              <button onClick={() => setShowChat(false)} className="p-1 hover:bg-zinc-800 rounded-lg transition-colors">
+                <X className="w-5 h-5 text-zinc-400" />
               </button>
             </div>
           </div>
+
+          {/* Messages */}
+          <div className="flex-1 p-4 overflow-y-auto space-y-3">
+            {messages.map((message) => (
+              <div key={message.id} className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}>
+                {message.sender === "bot" && (
+                  <div className="w-8 h-8 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                    <Bot className="w-4 h-4 text-white" />
+                  </div>
+                )}
+
+                <div
+                  className={`max-w-xs ${
+                    message.sender === "user"
+                      ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-lg rounded-br-sm"
+                      : "bg-zinc-800 text-white rounded-lg rounded-bl-sm"
+                  } px-3 py-2`}
+                >
+                  <p className="text-sm whitespace-pre-line">{message.text}</p>
+
+                  {/* Options */}
+                  {message.options && (
+                    <div className="mt-3 space-y-2">
+                      {message.options.map((option, index) => (
+                        <button
+                          key={index}
+                          onClick={() => (option.action ? handleActionClick(option.action) : handleOptionClick(option))}
+                          className={`w-full text-left p-2 text-sm rounded-lg border transition-all ${
+                            option.action === "enroll"
+                              ? "bg-emerald-500/20 border-emerald-500/50 hover:bg-emerald-500/30 text-emerald-400"
+                              : option.action
+                              ? "bg-teal-500/20 border-teal-500/50 hover:bg-teal-500/30 text-teal-400"
+                              : userProfile.interests?.includes(option.value)
+                              ? "bg-emerald-500/30 border-emerald-500 text-emerald-400"
+                              : "bg-zinc-700/50 border-zinc-600 hover:bg-zinc-700 hover:border-emerald-500/50 text-zinc-300"
+                          }`}
+                        >
+                          {option.text}
+                        </button>
+                      ))}
+
+                      {/* Continue button for interests */}
+                      {currentStep === "interests" && userProfile.interests.length > 0 && (
+                        <button
+                          onClick={proceedToNext}
+                          className="w-full p-2 text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-lg hover:shadow-lg hover:shadow-emerald-500/30 transition-all mt-2"
+                        >
+                          Продолжить →
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {message.sender === "user" && (
+                  <div className="w-8 h-8 bg-zinc-700 rounded-full flex items-center justify-center ml-3 flex-shrink-0">
+                    <User className="w-4 h-4 text-zinc-300" />
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Typing indicator */}
+            {isTyping && (
+              <div className="flex justify-start">
+                <div className="w-8 h-8 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center mr-3">
+                  <Bot className="w-4 h-4 text-white" />
+                </div>
+                <div className="bg-zinc-800 rounded-lg px-4 py-3">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"></div>
+                    <div
+                      className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"
+                      style={{ animationDelay: "0.1s" }}
+                    ></div>
+                    <div
+                      className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"
+                      style={{ animationDelay: "0.2s" }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          {(currentStep === "greeting" || currentStep === "question") && (
+            <div className="p-4 border-t border-zinc-700">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyPress={(e) => e.key === "Enter" && handleInputSubmit()}
+                  className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                  placeholder={currentStep === "greeting" ? "Напишите ваше имя..." : "Задайте вопрос..."}
+                />
+                <button
+                  onClick={handleInputSubmit}
+                  className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:shadow-lg hover:shadow-emerald-500/30 text-white rounded-lg transition-all"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
+      <div className="text-black">
+        <ChatBot />
+      </div>
     </div>
   );
 };

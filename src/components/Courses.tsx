@@ -21,12 +21,11 @@ import {
   ArrowRight,
   Gift,
 } from "lucide-react";
-
 const Courses = () => {
-  const [activeTab, setActiveTab] = useState("frontend");
+  const [activeTab, setActiveTab] = useState<"frontend" | "backend" | "fullstack" | "mobile">("frontend");
   const [hoveredTech, setHoveredTech] = useState<string | null>(null);
   const [selectedLevel, setSelectedLevel] = useState("beginner");
-
+  type CourseKey = "frontend" | "backend" | "fullstack" | "mobile";
   const courses = {
     frontend: {
       title: "Frontend Development",
@@ -145,7 +144,7 @@ const Courses = () => {
 
         {/* Course cards grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          {Object.entries(courses).map(([key, course]) => (
+          {(Object.entries(courses) as [CourseKey, (typeof courses)[CourseKey]][]).map(([key, course]) => (
             <div
               key={key}
               className={`relative group cursor-pointer transform transition-all duration-500 ${
@@ -249,10 +248,15 @@ const Courses = () => {
         <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-700 rounded-3xl p-8">
           <div className="flex items-center mb-8">
             <div
-              className={`w-20 h-20 bg-gradient-to-r ${courses[activeTab].color} rounded-2xl flex items-center justify-center mr-6`}
+              className={`w-20 h-20 bg-gradient-to-r ${
+                courses[activeTab as CourseKey].color
+              } rounded-2xl flex items-center justify-center mr-6`}
             >
-              {React.cloneElement(courses[activeTab].icon, { className: "w-10 h-10 text-white" })}
+              {React.cloneElement(courses[activeTab as keyof typeof courses].icon, {
+                className: "w-10 h-10 text-white",
+              })}
             </div>
+
             <div>
               <h3 className="text-3xl font-bold text-white mb-2">{courses[activeTab].title}</h3>
               <p className="text-zinc-400 text-lg">{courses[activeTab].description}</p>
